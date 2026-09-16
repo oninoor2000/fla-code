@@ -17,7 +17,11 @@ const defaults = {
 }
 
 function usage() {
-  console.log(`Usage: create-fla-app [project-directory]\n\nOptions:\n  --help       Show this help\n  --yes        Use defaults and skip prompts\n\nDefaults:\n  TanStack Start + shadcn/ui Base UI + local development`)
+  console.log(`Usage: create-fla-app [project-directory]\n\nOptions:\n  --help                    Show this help\n  --yes                     Use defaults and skip prompts\n  --database=<profile>      none | drizzle-postgres\n  --auth=<profile>          none | better-auth | better-auth-oidc\n  --deployment=<profile>    local | coolify | cloudflare\n\nDefaults:\n  TanStack Start + shadcn/ui Base UI + local development`)
+}
+
+function option(args, name) {
+  return args.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3)
 }
 
 async function choose(rl, label, options, fallback) {
@@ -196,7 +200,13 @@ async function main() {
 
   const yes = args.includes('--yes') || args.includes('-y')
   const projectArg = args.find((arg) => !arg.startsWith('-'))
-  const rl = yes ? null : createInterface({ input, output })
+  const selected = {
+    database: option(args, 'database'),
+    auth: option(args, 'auth'),
+    deployment: option(args, 'deployment'),
+  }
+  const hasExplicitProfile = Object.values(selected).some(Boolean)
+  const rl = yes || hasExplicitProfile ? null : createInterface({ input, output })
 
   try {
     const projectName = projectArg ?? (rl ? await rl.question('Project name: ') : 'fla-app')
@@ -205,9 +215,9 @@ async function main() {
     const target = resolve(process.cwd(), projectName)
     const profile = {
       ui: defaults.ui,
-      database: defaults.database,
-      auth: defaults.auth,
-      deployment: defaults.deployment,
+      database: selected.database ?? defaults.database,
+      auth: selected.auth ?? defaults.auth,
+      deployment: selected.deployment ?? defaults.deployment,
     }
 
     if (rl) {
