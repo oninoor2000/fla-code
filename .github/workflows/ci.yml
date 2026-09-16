@@ -21,7 +21,7 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm build
-      - run: pnpm create /tmp/fla-code-ci-app --yes
+      - run: node packages/create-fla-app/bin/create-fla-app.mjs /tmp/fla-code-ci-app --yes
       - run: pnpm --dir /tmp/fla-code-ci-app install
       - run: pnpm --dir /tmp/fla-code-ci-app lint
       - run: pnpm --dir /tmp/fla-code-ci-app typecheck
