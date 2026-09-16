@@ -78,16 +78,34 @@ export default defineConfig({
 
   if (profile.auth !== 'none') {
     await mkdir(join(target, 'src', 'routes', 'api', 'auth'), { recursive: true })
+    const oidcImports = profile.auth === 'better-auth-oidc'
+      ? "import { genericOAuth } from 'better-auth/plugins'\n"
+      : ''
+    const oidcPlugin = profile.auth === 'better-auth-oidc'
+      ? `    genericOAuth({
+      config: [{
+        providerId: 'keycloak',
+        clientId: process.env.KEYCLOAK_CLIENT_ID ?? '',
+        clientSecret: process.env.KEYCLOAK_CLIENT_SECRET ?? '',
+        discoveryUrl: process.env.KEYCLOAK_DISCOVERY_URL ?? '',
+        scopes: ['openid', 'profile', 'email'],
+      }],
+    }),
+`
+      : ''
     await writeFile(join(target, 'src', 'lib', 'auth.ts'), `import { betterAuth } from 'better-auth'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { tanstackStartCookies } from 'better-auth/tanstack-start'
+${oidcImports}
 
 import { db } from '@/db'
 
 export const auth = betterAuth({
   database: drizzleAdapter(db, { provider: 'pg' }),
   emailAndPassword: { enabled: true },
-  plugins: [tanstackStartCookies()],
+  plugins: [
+${oidcPlugin}    tanstackStartCookies(),
+  ],
 })
 `)
     await writeFile(join(target, 'src', 'lib', 'auth-client.ts'), `import { createAuthClient } from 'better-auth/react'
@@ -109,7 +127,10 @@ export const Route = createFileRoute('/api/auth/$')({
 `)
     const envPath = join(target, '.env.example')
     const env = await readFile(envPath, 'utf8')
-    await writeFile(envPath, `${env.trimEnd()}\n\nBETTER_AUTH_SECRET=replace-with-a-32-character-secret\nBETTER_AUTH_URL=http://localhost:3000\n`)
+    const oidcEnv = profile.auth === 'better-auth-oidc'
+      ? 'KEYCLOAK_CLIENT_ID=\nKEYCLOAK_CLIENT_SECRET=\nKEYCLOAK_DISCOVERY_URL=http://localhost:8080/realms/master/.well-known/openid-configuration\n'
+      : ''
+    await writeFile(envPath, `${env.trimEnd()}\n\nBETTER_AUTH_SECRET=replace-with-a-32-character-secret\nBETTER_AUTH_URL=http://localhost:3000\n${oidcEnv}`)
   }
 
   if (profile.deployment === 'coolify') {
