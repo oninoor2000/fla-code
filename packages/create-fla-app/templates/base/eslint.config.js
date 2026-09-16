@@ -6,13 +6,24 @@ import tseslint from 'typescript-eslint'
 import { globalIgnores } from 'eslint/config'
 
 export default tseslint.config([
-  globalIgnores(['dist']),
+  globalIgnores([
+    'dist',
+    'src/App.tsx',
+    'src/app/**',
+    'src/components/**',
+    'src/config/**',
+    'src/contexts/**',
+    'src/hooks/**',
+    'src/types/**',
+    'src/utils/**',
+    'packages/create-fla-app/templates/**',
+  ]),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
       js.configs.recommended,
       tseslint.configs.recommended,
-      reactHooks.configs['recommended-latest'],
+      reactHooks.configs.flat['recommended-latest'],
       reactRefresh.configs.vite,
     ],
     languageOptions: {
