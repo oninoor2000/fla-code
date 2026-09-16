@@ -17,7 +17,7 @@ const defaults = {
 }
 
 function usage() {
-  console.log(`Usage: create-fla-app [project-directory]\n\nOptions:\n  --help                    Show this help\n  --yes                     Use defaults and skip prompts\n  --database=<profile>      none | drizzle-postgres\n  --auth=<profile>          none | better-auth | better-auth-oidc\n  --deployment=<profile>    local | coolify | cloudflare\n\nDefaults:\n  TanStack Start + shadcn/ui Base UI + local development`)
+  console.log(`Usage: create-fla-app [project-directory]\n\nOptions:\n  --help                    Show this help\n  --yes                     Use defaults and skip prompts\n  --database=<profile>      none | drizzle-postgres | drizzle-d1\n  --auth=<profile>          none | better-auth | better-auth-oidc\n  --deployment=<profile>    local | coolify | cloudflare\n\nDefaults:\n  TanStack Start + shadcn/ui Base UI + local development`)
 }
 
 function option(args, name) {
@@ -80,6 +80,25 @@ export default defineConfig({
     await writeFile(envPath, `${env.trimEnd()}\n\nDATABASE_URL=postgresql://user:password@localhost:5432/app\n`)
   }
 
+  if (profile.database === 'drizzle-d1') {
+    packageJson.dependencies['drizzle-orm'] = '^0.44.7'
+    await mkdir(join(target, 'src', 'db'), { recursive: true })
+    await writeFile(join(target, 'src', 'db', 'index.ts'), `import { env } from 'cloudflare:workers'
+import { drizzle } from 'drizzle-orm/d1'
+
+import * as schema from './schema'
+
+export const db = drizzle(env.DB, { schema })
+`)
+    await writeFile(join(target, 'src', 'db', 'schema.ts'), `import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+
+export const healthcheck = sqliteTable('healthcheck', {
+  id: text('id').primaryKey(),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+})
+`)
+  }
+
   if (profile.auth !== 'none') {
     await mkdir(join(target, 'src', 'routes', 'api', 'auth'), { recursive: true })
     const oidcImports = profile.auth === 'better-auth-oidc'
@@ -97,18 +116,31 @@ export default defineConfig({
     }),
 `
       : ''
+    const cloudflareAuth = profile.database === 'drizzle-d1'
+    const authImports = cloudflareAuth
+      ? "import { env } from 'cloudflare:workers'\n"
+      : "import { drizzleAdapter } from 'better-auth/adapters/drizzle'\n"
+    const dbImport = cloudflareAuth ? '' : "import { db } from '@/db'\n"
+    const databaseConfig = cloudflareAuth
+      ? '  database: env.DB,'
+      : "  database: drizzleAdapter(db, { provider: 'pg' }),"
+    const authRuntimeConfig = cloudflareAuth
+      ? '  secret: env.BETTER_AUTH_SECRET,\n  baseURL: env.BETTER_AUTH_URL,\n'
+      : ''
+    const envPrefix = cloudflareAuth ? 'env' : 'process.env'
+    const resolvedOidcPlugin = oidcPlugin
+      .replaceAll('process.env.', `${envPrefix}.`)
     await writeFile(join(target, 'src', 'lib', 'auth.ts'), `import { betterAuth } from 'better-auth'
-import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { tanstackStartCookies } from 'better-auth/tanstack-start'
 ${oidcImports}
-
-import { db } from '@/db'
+${authImports}${dbImport}
 
 export const auth = betterAuth({
-  database: drizzleAdapter(db, { provider: 'pg' }),
+${databaseConfig}
+${authRuntimeConfig}
   emailAndPassword: { enabled: true },
   plugins: [
-${oidcPlugin}    tanstackStartCookies(),
+${resolvedOidcPlugin}    tanstackStartCookies(),
   ],
 })
 `)
@@ -167,12 +199,26 @@ export default defineEventHandler(() => ({ status: 'ok' }))
   }
 
   if (profile.deployment === 'cloudflare') {
-    if (profile.database === 'drizzle-postgres' || profile.auth !== 'none') {
-      throw new Error('Cloudflare profile currently requires database=none and auth=none; D1 auth is a separate adapter phase.')
+    if (profile.database === 'drizzle-postgres') {
+      throw new Error('Cloudflare profile requires database=none or drizzle-d1; use Coolify for PostgreSQL.')
     }
     packageJson.devDependencies['@cloudflare/vite-plugin'] = '^1.26.0'
     packageJson.devDependencies.wrangler = '^4.70.0'
     packageJson.scripts.deploy = 'pnpm run build && wrangler deploy'
+    packageJson.scripts['cf-typegen'] = 'wrangler types'
+    packageJson.scripts.typecheck = 'wrangler types && tsc --noEmit'
+    packageJson.scripts.build = 'wrangler types && tsc -b && vite build'
+    const tsconfigPath = join(target, 'tsconfig.json')
+    const tsconfig = await readFile(tsconfigPath, 'utf8')
+    await writeFile(tsconfigPath, tsconfig.replace('"src/vite-env.d.ts"', '"src/vite-env.d.ts",\n    "src/cloudflare-env.d.ts",\n    "worker-configuration.d.ts"'))
+    await writeFile(join(target, 'src', 'cloudflare-env.d.ts'), `interface __BaseEnv_Env {
+  BETTER_AUTH_SECRET: string
+  BETTER_AUTH_URL: string
+  KEYCLOAK_CLIENT_ID?: string
+  KEYCLOAK_CLIENT_SECRET?: string
+  KEYCLOAK_DISCOVERY_URL?: string
+}
+`)
     const workspacePath = join(target, 'pnpm-workspace.yaml')
     const workspaceConfig = await readFile(workspacePath, 'utf8')
     await writeFile(workspacePath, workspaceConfig.replace('allowBuilds:\n  esbuild: true', 'allowBuilds:\n  esbuild: true\n  workerd: true\n  lightningcss: true'))
@@ -180,14 +226,23 @@ export default defineEventHandler(() => ({ status: 'ok' }))
     const viteConfig = await readFile(vitePath, 'utf8')
     await writeFile(vitePath, viteConfig
       .replace("import { tanstackStart } from '@tanstack/react-start/plugin/vite'", "import { tanstackStart } from '@tanstack/react-start/plugin/vite'\nimport { cloudflare } from '@cloudflare/vite-plugin'")
-      .replace('plugins: [tanstackStart(), tailwindcss(), viteReact()],', "plugins: [cloudflare({ viteEnvironment: { name: 'ssr' } }), tanstackStart(), tailwindcss(), viteReact()],"))
-    await writeFile(join(target, 'wrangler.jsonc'), JSON.stringify({
+      .replace('plugins: [tanstackStart(), tailwindcss(), viteReact()],', "build: { rollupOptions: { external: ['cloudflare:workers'] } },\n  plugins: [cloudflare({ viteEnvironment: { name: 'ssr' } }), tanstackStart(), tailwindcss(), viteReact()],"))
+    const wranglerConfig = {
       $schema: 'node_modules/wrangler/config-schema.json',
       name: packageJson.name,
-      compatibility_date: '2025-09-02',
+      compatibility_date: '2026-09-17',
       compatibility_flags: ['nodejs_compat'],
       main: '@tanstack/react-start/server-entry',
-    }, null, 2) + '\n')
+      observability: { enabled: true },
+    }
+    if (profile.database === 'drizzle-d1') {
+      wranglerConfig.d1_databases = [{
+        binding: 'DB',
+        database_name: `${packageJson.name}-db`,
+        database_id: 'replace-after-wrangler-d1-create',
+      }]
+    }
+    await writeFile(join(target, 'wrangler.jsonc'), JSON.stringify(wranglerConfig, null, 2) + '\n')
   }
 }
 
@@ -224,6 +279,7 @@ async function main() {
       profile.database = await choose(rl, 'Database', [
         { value: 'none', label: 'None' },
         { value: 'drizzle-postgres', label: 'Drizzle + PostgreSQL' },
+        { value: 'drizzle-d1', label: 'Drizzle + Cloudflare D1' },
       ], defaults.database)
       profile.auth = await choose(rl, 'Authentication', [
         { value: 'none', label: 'None' },
@@ -239,6 +295,9 @@ async function main() {
 
     if (profile.auth !== 'none' && profile.database === 'none') {
       throw new Error('Better Auth requires the Drizzle + PostgreSQL database profile.')
+    }
+    if (profile.database === 'drizzle-d1' && profile.deployment !== 'cloudflare') {
+      throw new Error('Drizzle + D1 requires the Cloudflare Workers deployment profile.')
     }
 
     await mkdir(target, { recursive: true })
