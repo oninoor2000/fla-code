@@ -42,6 +42,76 @@ async function applyProfile(target, packageJson, profile) {
     packageJson.dependencies['better-auth'] = '^1.4.5'
   }
 
+  if (profile.database === 'drizzle-postgres') {
+    await mkdir(join(target, 'src', 'db'), { recursive: true })
+    await writeFile(join(target, 'src', 'db', 'index.ts'), `import { drizzle } from 'drizzle-orm/node-postgres'
+import { Pool } from 'pg'
+
+import * as schema from './schema'
+
+const connectionString = process.env.DATABASE_URL
+if (!connectionString) throw new Error('DATABASE_URL is required')
+
+export const pool = new Pool({ connectionString })
+export const db = drizzle(pool, { schema })
+`)
+    await writeFile(join(target, 'src', 'db', 'schema.ts'), `import { pgTable, text, timestamp } from 'drizzle-orm/pg-core'
+
+export const healthcheck = pgTable('healthcheck', {
+  id: text('id').primaryKey(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+})
+`)
+    await writeFile(join(target, 'drizzle.config.ts'), `import { defineConfig } from 'drizzle-kit'
+
+export default defineConfig({
+  schema: './src/db/schema.ts',
+  out: './drizzle',
+  dialect: 'postgresql',
+  dbCredentials: { url: process.env.DATABASE_URL ?? '' },
+})
+`)
+    const envPath = join(target, '.env.example')
+    const env = await readFile(envPath, 'utf8')
+    await writeFile(envPath, `${env.trimEnd()}\n\nDATABASE_URL=postgresql://user:password@localhost:5432/app\n`)
+  }
+
+  if (profile.auth !== 'none') {
+    await mkdir(join(target, 'src', 'routes', 'api', 'auth'), { recursive: true })
+    await writeFile(join(target, 'src', 'lib', 'auth.ts'), `import { betterAuth } from 'better-auth'
+import { drizzleAdapter } from 'better-auth/adapters/drizzle'
+import { tanstackStartCookies } from 'better-auth/tanstack-start'
+
+import { db } from '@/db'
+
+export const auth = betterAuth({
+  database: drizzleAdapter(db, { provider: 'pg' }),
+  emailAndPassword: { enabled: true },
+  plugins: [tanstackStartCookies()],
+})
+`)
+    await writeFile(join(target, 'src', 'lib', 'auth-client.ts'), `import { createAuthClient } from 'better-auth/react'
+
+export const authClient = createAuthClient()
+`)
+    await writeFile(join(target, 'src', 'routes', 'api', 'auth', '$.ts'), `import { auth } from '@/lib/auth'
+import { createFileRoute } from '@tanstack/react-router'
+
+export const Route = createFileRoute('/api/auth/$')({
+  server: {
+    handlers: {
+      GET: async ({ request }: { request: Request }) => auth.handler(request),
+      POST: async ({ request }: { request: Request }) => auth.handler(request),
+    },
+  },
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+} as any)
+`)
+    const envPath = join(target, '.env.example')
+    const env = await readFile(envPath, 'utf8')
+    await writeFile(envPath, `${env.trimEnd()}\n\nBETTER_AUTH_SECRET=replace-with-a-32-character-secret\nBETTER_AUTH_URL=http://localhost:3000\n`)
+  }
+
   if (profile.deployment === 'coolify') {
     packageJson.dependencies.nitro = 'latest'
     packageJson.scripts.start = 'node .output/server/index.mjs'
@@ -66,6 +136,9 @@ async function applyProfile(target, packageJson, profile) {
   }
 
   if (profile.deployment === 'cloudflare') {
+    if (profile.database === 'drizzle-postgres' || profile.auth !== 'none') {
+      throw new Error('Cloudflare profile currently requires database=none and auth=none; D1 auth is a separate adapter phase.')
+    }
     packageJson.devDependencies['@cloudflare/vite-plugin'] = '^1.26.0'
     packageJson.devDependencies.wrangler = '^4.70.0'
     packageJson.scripts.deploy = 'pnpm run build && wrangler deploy'
@@ -125,6 +198,10 @@ async function main() {
         { value: 'coolify', label: 'Coolify' },
         { value: 'cloudflare', label: 'Cloudflare Workers' },
       ], defaults.deployment)
+    }
+
+    if (profile.auth !== 'none' && profile.database === 'none') {
+      throw new Error('Better Auth requires the Drizzle + PostgreSQL database profile.')
     }
 
     await mkdir(target, { recursive: true })
