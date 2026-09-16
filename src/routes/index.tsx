@@ -9,6 +9,9 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { SectionCards } from '@/app/dashboard/components/section-cards'
+import { Link } from '@tanstack/react-router'
+import { buttonVariants } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
 export const Route = createFileRoute('/')({ component: Home })
 
@@ -23,6 +26,9 @@ function Home() {
             TanStack Start with shadcn/ui Base UI primitives, ready for the next
             feature.
           </p>
+          <Link to="/landing" className={cn(buttonVariants({ variant: 'outline' }))}>
+            View landing page
+          </Link>
         </div>
         <SectionCards />
         <Card>
