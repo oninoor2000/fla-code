@@ -13,6 +13,8 @@ pnpm dev
 Open http://localhost:3000. Add route files under `src/routes`; TanStack Router
 updates `src/routeTree.gen.ts` for you.
 
+The server health check is available at http://localhost:3000/healthz.
+
 Build the production app with:
 
 ```bash
