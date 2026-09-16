@@ -8,6 +8,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import { SectionCards } from '@/app/dashboard/components/section-cards'
 
 export const Route = createFileRoute('/')({ component: Home })
 
@@ -23,6 +24,7 @@ function Home() {
             feature.
           </p>
         </div>
+        <SectionCards />
         <Card>
           <CardHeader>
             <CardTitle>Golden path initialized</CardTitle>
