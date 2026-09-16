@@ -13,11 +13,12 @@ const defaults = {
   ui: 'base-ui',
   database: 'none',
   auth: 'none',
+  storage: 'none',
   deployment: 'local',
 }
 
 function usage() {
-  console.log(`Usage: create-fla-app [project-directory]\n\nOptions:\n  --help                    Show this help\n  --yes                     Use defaults and skip prompts\n  --database=<profile>      none | drizzle-postgres | drizzle-d1\n  --auth=<profile>          none | better-auth | better-auth-oidc\n  --deployment=<profile>    local | coolify | cloudflare\n\nDefaults:\n  TanStack Start + shadcn/ui Base UI + local development`)
+  console.log(`Usage: create-fla-app [project-directory]\n\nOptions:\n  --help                    Show this help\n  --yes                     Use defaults and skip prompts\n  --database=<profile>      none | drizzle-postgres | drizzle-d1\n  --auth=<profile>          none | better-auth | better-auth-oidc\n  --storage=<profile>       none | rustfs-s3 | cloudflare-r2\n  --deployment=<profile>    local | coolify | cloudflare\n\nDefaults:\n  TanStack Start + shadcn/ui Base UI + local development`)
 }
 
 function option(args, name) {
@@ -45,6 +46,46 @@ async function applyProfile(target, packageJson, profile) {
 
   if (profile.auth !== 'none') {
     packageJson.dependencies['better-auth'] = '^1.4.5'
+  }
+
+  if (profile.storage === 'rustfs-s3') {
+    packageJson.dependencies['@aws-sdk/client-s3'] = '^3.900.0'
+    await writeFile(join(target, 'src', 'lib', 'storage.ts'), `import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+
+const bucket = process.env.S3_BUCKET
+if (!bucket) throw new Error('S3_BUCKET is required')
+
+export const storage = new S3Client({
+  region: process.env.S3_REGION ?? 'us-east-1',
+  endpoint: process.env.S3_ENDPOINT,
+  forcePathStyle: true,
+  credentials: {
+    accessKeyId: process.env.S3_ACCESS_KEY_ID ?? '',
+    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? '',
+  },
+})
+
+export const putObject = (key: string, body: Uint8Array | string, contentType?: string) =>
+  storage.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: contentType }))
+
+export const getObject = (key: string) =>
+  storage.send(new GetObjectCommand({ Bucket: bucket, Key: key }))
+`)
+    const envPath = join(target, '.env.example')
+    const env = await readFile(envPath, 'utf8')
+    await writeFile(envPath, `${env.trimEnd()}\n\nS3_ENDPOINT=http://rustfs:9000\nS3_REGION=us-east-1\nS3_BUCKET=app\nS3_ACCESS_KEY_ID=\nS3_SECRET_ACCESS_KEY=\n`)
+  }
+
+  if (profile.storage === 'cloudflare-r2') {
+    await writeFile(join(target, 'src', 'lib', 'storage.ts'), `import { env } from 'cloudflare:workers'
+
+export const storage = env.BUCKET
+
+export const putObject = (key: string, body: ArrayBuffer | ReadableStream | string, contentType?: string) =>
+  storage.put(key, body, contentType ? { httpMetadata: { contentType } } : undefined)
+
+export const getObject = (key: string) => storage.get(key)
+`)
   }
 
   if (profile.database === 'drizzle-postgres') {
@@ -250,6 +291,9 @@ export default defineEventHandler(() => ({ status: 'ok' }))
         database_id: 'replace-after-wrangler-d1-create',
       }]
     }
+    if (profile.storage === 'cloudflare-r2') {
+      wranglerConfig.r2_buckets = [{ binding: 'BUCKET', bucket_name: `${packageJson.name}-storage` }]
+    }
     if (cloudflareAuth) {
       await writeFile(join(target, 'src', 'server.ts'), `import handler from '@tanstack/react-start/server-entry'
 import { auth } from './lib/auth'
@@ -280,6 +324,7 @@ async function main() {
   const selected = {
     database: option(args, 'database'),
     auth: option(args, 'auth'),
+    storage: option(args, 'storage'),
     deployment: option(args, 'deployment'),
   }
   const hasExplicitProfile = Object.values(selected).some(Boolean)
@@ -294,6 +339,7 @@ async function main() {
       ui: defaults.ui,
       database: selected.database ?? defaults.database,
       auth: selected.auth ?? defaults.auth,
+      storage: selected.storage ?? defaults.storage,
       deployment: selected.deployment ?? defaults.deployment,
     }
 
@@ -308,6 +354,11 @@ async function main() {
         { value: 'better-auth', label: 'Better Auth' },
         { value: 'better-auth-oidc', label: 'Better Auth + OIDC/Keycloak' },
       ], defaults.auth)
+      profile.storage = await choose(rl, 'Storage', [
+        { value: 'none', label: 'None' },
+        { value: 'rustfs-s3', label: 'RustFS / S3-compatible' },
+        { value: 'cloudflare-r2', label: 'Cloudflare R2' },
+      ], defaults.storage)
       profile.deployment = await choose(rl, 'Deployment', [
         { value: 'local', label: 'Local' },
         { value: 'coolify', label: 'Coolify' },
@@ -320,6 +371,12 @@ async function main() {
     }
     if (profile.database === 'drizzle-d1' && profile.deployment !== 'cloudflare') {
       throw new Error('Drizzle + D1 requires the Cloudflare Workers deployment profile.')
+    }
+    if (profile.storage === 'rustfs-s3' && profile.deployment === 'cloudflare') {
+      throw new Error('RustFS/S3 storage requires the Coolify or local deployment profile.')
+    }
+    if (profile.storage === 'cloudflare-r2' && profile.deployment !== 'cloudflare') {
+      throw new Error('Cloudflare R2 storage requires the Cloudflare Workers deployment profile.')
     }
 
     await mkdir(target, { recursive: true })

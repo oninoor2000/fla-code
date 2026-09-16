@@ -43,6 +43,9 @@ node packages/create-fla-app/bin/create-fla-app.mjs ./my-app --yes \
   --deployment=coolify
 ```
 
+Storage choices are `rustfs-s3` for Coolify/local or `cloudflare-r2` for
+Cloudflare. The CLI writes the matching adapter and deployment binding.
+
 ## Direction
 
 - Base UI is the only supported component primitive for new projects.
