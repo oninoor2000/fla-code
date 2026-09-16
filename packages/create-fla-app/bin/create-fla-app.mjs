@@ -114,12 +114,13 @@ export const Route = createFileRoute('/api/auth/$')({
 
   if (profile.deployment === 'coolify') {
     packageJson.dependencies.nitro = 'latest'
+    packageJson.dependencies.h3 = '^1.15.4'
     packageJson.scripts.start = 'node .output/server/index.mjs'
     const vitePath = join(target, 'vite.config.ts')
     const viteConfig = await readFile(vitePath, 'utf8')
     await writeFile(vitePath, viteConfig
       .replace("import { tanstackStart } from '@tanstack/react-start/plugin/vite'", "import { tanstackStart } from '@tanstack/react-start/plugin/vite'\nimport { nitro } from 'nitro/vite'")
-      .replace('plugins: [tanstackStart(), tailwindcss(), viteReact()],', "plugins: [tanstackStart(), tailwindcss(), nitro(), viteReact()],"))
+      .replace('plugins: [tanstackStart(), tailwindcss(), viteReact()],', "nitro: { serverDir: './server' },\n  plugins: [tanstackStart(), tailwindcss(), nitro(), viteReact()],"))
     await writeFile(join(target, 'Dockerfile'), [
       'FROM node:22-bookworm-slim',
       'WORKDIR /app',
@@ -133,6 +134,11 @@ export const Route = createFileRoute('/api/auth/$')({
       '',
     ].join('\n'))
     await writeFile(join(target, '.dockerignore'), 'node_modules\ndist\n.output\n.env\n.git\n')
+    await mkdir(join(target, 'server', 'routes'), { recursive: true })
+    await writeFile(join(target, 'server', 'routes', 'healthz.get.ts'), `import { defineEventHandler } from 'h3'
+
+export default defineEventHandler(() => ({ status: 'ok' }))
+`)
   }
 
   if (profile.deployment === 'cloudflare') {
