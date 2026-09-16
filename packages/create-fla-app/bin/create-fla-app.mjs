@@ -35,6 +35,7 @@ async function choose(rl, label, options, fallback) {
 }
 
 async function applyProfile(target, packageJson, profile) {
+  const cloudflareAuth = profile.database === 'drizzle-d1' && profile.auth !== 'none'
   if (profile.database === 'drizzle-postgres') {
     packageJson.dependencies['drizzle-orm'] = '^0.44.7'
     packageJson.dependencies.pg = '^8.16.3'
@@ -100,7 +101,6 @@ export const healthcheck = sqliteTable('healthcheck', {
   }
 
   if (profile.auth !== 'none') {
-    await mkdir(join(target, 'src', 'routes', 'api', 'auth'), { recursive: true })
     const oidcImports = profile.auth === 'better-auth-oidc'
       ? "import { genericOAuth } from 'better-auth/plugins'\n"
       : ''
@@ -116,7 +116,6 @@ export const healthcheck = sqliteTable('healthcheck', {
     }),
 `
       : ''
-    const cloudflareAuth = profile.database === 'drizzle-d1'
     const authImports = cloudflareAuth
       ? "import { env } from 'cloudflare:workers'\n"
       : "import { drizzleAdapter } from 'better-auth/adapters/drizzle'\n"
@@ -148,19 +147,27 @@ ${resolvedOidcPlugin}    tanstackStartCookies(),
 
 export const authClient = createAuthClient()
 `)
-    await writeFile(join(target, 'src', 'routes', 'api', 'auth', '$.ts'), `import { auth } from '@/lib/auth'
-import { createFileRoute } from '@tanstack/react-router'
+    if (!cloudflareAuth) {
+      await mkdir(join(target, 'src', 'routes', 'api', 'auth'), { recursive: true })
+      await writeFile(join(target, 'src', 'routes', 'api', 'auth', '$.ts'), `import { createFileRoute } from '@tanstack/react-router'
 
 export const Route = createFileRoute('/api/auth/$')({
   server: {
     handlers: {
-      GET: async ({ request }: { request: Request }) => auth.handler(request),
-      POST: async ({ request }: { request: Request }) => auth.handler(request),
+      GET: async ({ request }: { request: Request }) => {
+        const { auth } = await import('@/lib/auth')
+        return auth.handler(request)
+      },
+      POST: async ({ request }: { request: Request }) => {
+        const { auth } = await import('@/lib/auth')
+        return auth.handler(request)
+      },
     },
   },
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 } as any)
 `)
+    }
     const envPath = join(target, '.env.example')
     const env = await readFile(envPath, 'utf8')
     const oidcEnv = profile.auth === 'better-auth-oidc'
@@ -210,7 +217,8 @@ export default defineEventHandler(() => ({ status: 'ok' }))
     packageJson.scripts.build = 'wrangler types && tsc -b && vite build'
     const tsconfigPath = join(target, 'tsconfig.json')
     const tsconfig = await readFile(tsconfigPath, 'utf8')
-    await writeFile(tsconfigPath, tsconfig.replace('"src/vite-env.d.ts"', '"src/vite-env.d.ts",\n    "src/cloudflare-env.d.ts",\n    "worker-configuration.d.ts"'))
+    const tsconfigFiles = cloudflareAuth ? '"src/vite-env.d.ts",\n    "src/cloudflare-env.d.ts",\n    "src/server.ts",\n    "worker-configuration.d.ts"' : '"src/vite-env.d.ts",\n    "src/cloudflare-env.d.ts",\n    "worker-configuration.d.ts"'
+    await writeFile(tsconfigPath, tsconfig.replace('"src/vite-env.d.ts"', tsconfigFiles))
     await writeFile(join(target, 'src', 'cloudflare-env.d.ts'), `interface __BaseEnv_Env {
   BETTER_AUTH_SECRET: string
   BETTER_AUTH_URL: string
@@ -232,7 +240,7 @@ export default defineEventHandler(() => ({ status: 'ok' }))
       name: packageJson.name,
       compatibility_date: '2026-09-17',
       compatibility_flags: ['nodejs_compat'],
-      main: '@tanstack/react-start/server-entry',
+      main: cloudflareAuth ? 'src/server.ts' : '@tanstack/react-start/server-entry',
       observability: { enabled: true },
     }
     if (profile.database === 'drizzle-d1') {
@@ -241,6 +249,20 @@ export default defineEventHandler(() => ({ status: 'ok' }))
         database_name: `${packageJson.name}-db`,
         database_id: 'replace-after-wrangler-d1-create',
       }]
+    }
+    if (cloudflareAuth) {
+      await writeFile(join(target, 'src', 'server.ts'), `import handler from '@tanstack/react-start/server-entry'
+import { auth } from './lib/auth'
+
+export default {
+  async fetch(request: Request) {
+    if (new URL(request.url).pathname.startsWith('/api/auth/')) {
+      return auth.handler(request)
+    }
+    return handler.fetch(request)
+  },
+}
+`)
     }
     await writeFile(join(target, 'wrangler.jsonc'), JSON.stringify(wranglerConfig, null, 2) + '\n')
   }
