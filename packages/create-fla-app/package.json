@@ -1,0 +1,16 @@
+{
+  "name": "create-fla-app",
+  "version": "0.1.0",
+  "description": "Interactive starter generator for Fla Code applications.",
+  "type": "module",
+  "bin": {
+    "create-fla-app": "bin/create-fla-app.mjs"
+  },
+  "files": ["bin", "templates"],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
