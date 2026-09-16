@@ -41,3 +41,6 @@ local profile when you want the smallest install.
   Cloudflare profiles will be added incrementally.
 - The original dashboard demo remains in `src/app` while its routes and
   interactions are migrated to TanStack Router.
+
+Pull requests and pushes to `main` run the install, lint, typecheck, build, and
+generated-project smoke checks in GitHub Actions.
