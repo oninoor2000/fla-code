@@ -26,13 +26,22 @@ pnpm build
 Run the local generator from the repository root:
 
 ```bash
-pnpm create ./my-app
+pnpm run create -- ./my-app
 ```
 
 The generator uses Base UI by default and records the selected profile in
 `.fla-code.json`. Local, Coolify, Cloudflare, Drizzle/PostgreSQL, Better Auth,
 and Keycloak/OIDC profiles generate their corresponding configuration; use the
 local profile when you want the smallest install.
+
+For automation, pass the profile explicitly:
+
+```bash
+node packages/create-fla-app/bin/create-fla-app.mjs ./my-app --yes \
+  --database=drizzle-postgres \
+  --auth=better-auth-oidc \
+  --deployment=coolify
+```
 
 ## Direction
 
