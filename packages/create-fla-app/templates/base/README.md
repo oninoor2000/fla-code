@@ -1,9 +1,8 @@
-# Fla Code
+# Fla Code Starter
 
 The reusable starter foundation behind `create-fla-app`.
 
-Current checkpoint: TanStack Start + file-based routing + shadcn/ui Base UI,
-using the ShadcnStore dashboard as the migration source.
+TanStack Start + file-based routing + shadcn/ui Base UI.
 
 ```bash
 pnpm install
@@ -14,6 +13,9 @@ Open http://localhost:3000. Add route files under `src/routes`; TanStack Router
 updates `src/routeTree.gen.ts` for you.
 
 The server health check is available at http://localhost:3000/healthz.
+
+This is the minimal generated foundation. Add database, auth, and deployment
+profiles with `create-fla-app`.
 
 Build the production app with:
 

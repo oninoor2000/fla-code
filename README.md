@@ -30,9 +30,9 @@ pnpm create ./my-app
 ```
 
 The generator uses Base UI by default and records the selected profile in
-`.fla-code.json`. Database, authentication, and deployment selections are
-currently recorded for the next adapter phase; the generated project remains
-the verified local TanStack Start template.
+`.fla-code.json`. Local, Coolify, Cloudflare, Drizzle/PostgreSQL, Better Auth,
+and Keycloak/OIDC profiles generate their corresponding configuration; use the
+local profile when you want the smallest install.
 
 ## Direction
 
