@@ -11,6 +11,7 @@ const templateRoot = join(packageRoot, 'templates', 'base')
 
 const defaults = {
   ui: 'base-ui',
+  packageManager: 'pnpm',
   database: 'none',
   auth: 'none',
   storage: 'none',
@@ -18,7 +19,7 @@ const defaults = {
 }
 
 function usage() {
-  console.log(`Usage: create-fla-app [project-directory]\n\nOptions:\n  --help                    Show this help\n  --yes                     Use defaults and skip prompts\n  --database=<profile>      none | drizzle-postgres | drizzle-d1\n  --auth=<profile>          none | better-auth | better-auth-oidc\n  --storage=<profile>       none | rustfs-s3 | cloudflare-r2\n  --deployment=<profile>    local | coolify | cloudflare\n\nDefaults:\n  TanStack Start + shadcn/ui Base UI + local development`)
+  console.log(`Usage: create-fla-app [project-directory]\n\nOptions:\n  --help                    Show this help\n  --yes                     Use defaults and skip prompts\n  --package-manager=<pm>    pnpm | bun\n  --database=<profile>      none | drizzle-postgres | drizzle-d1\n  --auth=<profile>          none | better-auth | better-auth-oidc\n  --storage=<profile>       none | rustfs-s3 | cloudflare-r2\n  --deployment=<profile>    local | coolify | cloudflare\n\nDefaults:\n  TanStack Start + shadcn/ui Base UI + pnpm + local development`)
 }
 
 function option(args, name) {
@@ -36,6 +37,8 @@ async function choose(rl, label, options, fallback) {
 }
 
 async function applyProfile(target, packageJson, profile) {
+  const run = profile.packageManager === 'bun' ? 'bun run' : 'pnpm run'
+  const exec = profile.packageManager === 'bun' ? 'bunx' : 'pnpm exec'
   const cloudflareAuth = profile.database === 'drizzle-d1' && profile.auth !== 'none'
   if (profile.database === 'drizzle-postgres') {
     packageJson.dependencies['drizzle-orm'] = '^0.44.7'
@@ -220,22 +223,23 @@ export const Route = createFileRoute('/api/auth/$')({
   if (profile.deployment === 'coolify') {
     packageJson.dependencies.nitro = 'latest'
     packageJson.dependencies.h3 = '^1.15.4'
-    packageJson.scripts.start = 'node .output/server/index.mjs'
+    packageJson.scripts.start = profile.packageManager === 'bun'
+      ? 'bun .output/server/index.mjs'
+      : 'node .output/server/index.mjs'
     const vitePath = join(target, 'vite.config.ts')
     const viteConfig = await readFile(vitePath, 'utf8')
     await writeFile(vitePath, viteConfig
       .replace("import { tanstackStart } from '@tanstack/react-start/plugin/vite'", "import { tanstackStart } from '@tanstack/react-start/plugin/vite'\nimport { nitro } from 'nitro/vite'")
       .replace('plugins: [tanstackStart(), tailwindcss(), viteReact()],', "nitro: { serverDir: './server' },\n  plugins: [tanstackStart(), tailwindcss(), nitro(), viteReact()],"))
     await writeFile(join(target, 'Dockerfile'), [
-      'FROM node:22-bookworm-slim',
+      profile.packageManager === 'bun' ? 'FROM oven/bun:1' : 'FROM node:22-bookworm-slim',
       'WORKDIR /app',
-      'COPY package.json pnpm-lock.yaml ./',
-      'RUN corepack enable && pnpm install --no-frozen-lockfile',
+      'COPY package.json ./',
       'COPY . .',
-      'RUN pnpm build',
+      profile.packageManager === 'bun' ? 'RUN bun install && bun run build' : 'RUN corepack enable && pnpm install --no-frozen-lockfile && pnpm run build',
       'ENV HOST=0.0.0.0',
       'EXPOSE 3000',
-      'CMD ["pnpm", "start"]',
+      profile.packageManager === 'bun' ? 'CMD ["bun", "run", "start"]' : 'CMD ["pnpm", "start"]',
       '',
     ].join('\n'))
     await writeFile(join(target, '.dockerignore'), 'node_modules\ndist\n.output\n.env\n.git\n')
@@ -252,10 +256,10 @@ export default defineEventHandler(() => ({ status: 'ok' }))
     }
     packageJson.devDependencies['@cloudflare/vite-plugin'] = '^1.26.0'
     packageJson.devDependencies.wrangler = '^4.70.0'
-    packageJson.scripts.deploy = 'pnpm run build && wrangler deploy'
-    packageJson.scripts['cf-typegen'] = 'wrangler types'
-    packageJson.scripts.typecheck = 'wrangler types && tsc --noEmit'
-    packageJson.scripts.build = 'wrangler types && tsc -b && vite build'
+    packageJson.scripts.deploy = `${run} build && ${exec} wrangler deploy`
+    packageJson.scripts['cf-typegen'] = `${exec} wrangler types`
+    packageJson.scripts.typecheck = `${run} cf-typegen && tsc --noEmit`
+    packageJson.scripts.build = `${run} cf-typegen && tsc -b && vite build`
     const tsconfigPath = join(target, 'tsconfig.json')
     const tsconfig = await readFile(tsconfigPath, 'utf8')
     const tsconfigFiles = cloudflareAuth ? '"src/vite-env.d.ts",\n    "src/cloudflare-env.d.ts",\n    "src/server.ts",\n    "worker-configuration.d.ts"' : '"src/vite-env.d.ts",\n    "src/cloudflare-env.d.ts",\n    "worker-configuration.d.ts"'
@@ -322,6 +326,7 @@ async function main() {
   const yes = args.includes('--yes') || args.includes('-y')
   const projectArg = args.find((arg) => !arg.startsWith('-'))
   const selected = {
+    packageManager: option(args, 'package-manager'),
     database: option(args, 'database'),
     auth: option(args, 'auth'),
     storage: option(args, 'storage'),
@@ -337,6 +342,7 @@ async function main() {
     const target = resolve(process.cwd(), projectName)
     const profile = {
       ui: defaults.ui,
+      packageManager: selected.packageManager ?? defaults.packageManager,
       database: selected.database ?? defaults.database,
       auth: selected.auth ?? defaults.auth,
       storage: selected.storage ?? defaults.storage,
@@ -344,6 +350,10 @@ async function main() {
     }
 
     if (rl) {
+      profile.packageManager = await choose(rl, 'Package manager / local runtime', [
+        { value: 'pnpm', label: 'pnpm' },
+        { value: 'bun', label: 'Bun' },
+      ], defaults.packageManager)
       profile.database = await choose(rl, 'Database', [
         { value: 'none', label: 'None' },
         { value: 'drizzle-postgres', label: 'Drizzle + PostgreSQL' },
@@ -392,10 +402,12 @@ async function main() {
     await writeFile(join(target, '.fla-code.json'), `${JSON.stringify(profile, null, 2)}\n`)
 
     console.log(`\nCreated ${target}`)
+    packageJson.packageManager = profile.packageManager === 'bun' ? 'bun@1.3.14' : 'pnpm@11'
+    await writeFile(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`)
     console.log('Next steps:')
     console.log(`  cd ${projectName}`)
-    console.log('  pnpm install')
-    console.log('  pnpm dev')
+    console.log(`  ${profile.packageManager} install`)
+    console.log(`  ${profile.packageManager} run dev`)
   } finally {
     rl?.close()
   }

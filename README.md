@@ -21,6 +21,25 @@ Build the production app with:
 pnpm build
 ```
 
+## Bun
+
+Bun works as the local package manager and runtime:
+
+```bash
+bun install
+bun run dev
+```
+
+To generate a Bun project, select Bun in the TUI or pass the flag:
+
+```bash
+node packages/create-fla-app/bin/create-fla-app.mjs ./my-bun-app --yes \
+  --package-manager=bun
+```
+
+Coolify projects generated with this option use the `oven/bun` image. Cloudflare
+projects use Bun for local scripts while the deployed runtime remains Workers.
+
 ## Generate a project
 
 Run the local generator from the repository root:
