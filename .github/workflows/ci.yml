@@ -26,3 +26,19 @@ jobs:
       - run: pnpm --dir /tmp/fla-code-ci-app lint
       - run: pnpm --dir /tmp/fla-code-ci-app typecheck
       - run: pnpm --dir /tmp/fla-code-ci-app build
+
+  bun-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node packages/create-fla-app/bin/create-fla-app.mjs /tmp/fla-code-bun-ci-app --yes --package-manager=bun
+      - run: bun install --cwd /tmp/fla-code-bun-ci-app
+      - run: bun run --cwd /tmp/fla-code-bun-ci-app lint
+      - run: bun run --cwd /tmp/fla-code-bun-ci-app typecheck
+      - run: bun run --cwd /tmp/fla-code-bun-ci-app build
